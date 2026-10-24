@@ -569,6 +569,14 @@
                                   VerticalAlignment="Center"
                                   IsCheckedChanged="CheckApplyFans_Changed" />
                     </StackPanel>
+                    <StackPanel x:Name="panelN6506" IsVisible="False" Spacing="5">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="buttonN6506Maximum" Classes="ghelper" Content="校准" Click="N6506Maximum_Click" />
+                            <Button x:Name="buttonN6506Cancel" Classes="ghelper" Content="取消校准" IsVisible="False" Click="N6506Cancel_Click" />
+                            <TextBlock x:Name="labelN6506Maximum" Classes="label-dim" VerticalAlignment="Center" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <TextBlock x:Name="labelN6506CurveHint" Classes="label-dim" FontSize="10" TextWrapping="Wrap" />
+                    </StackPanel>
                     <!-- experimental EC manual fan follower: live duties or a status key -->
                     <TextBlock x:Name="labelManualFanStatus" Classes="label-dim"
                                Text="" FontSize="11" Margin="0,4,0,0" IsVisible="False" />

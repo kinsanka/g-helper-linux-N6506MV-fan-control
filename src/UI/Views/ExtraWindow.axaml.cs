@@ -1331,7 +1331,7 @@ public partial class ExtraWindow : Window
         checkBootSound.IsChecked = bootSound == 1;
 
         // Experimental EC manual fan control (ASUS only)
-        bool manualFan = App.Wmi is Platform.Linux.LinuxAsusWmi;
+        bool manualFan = App.Wmi is Platform.Linux.LinuxAsusWmi && !Fan.N6506FanService.IsSupported;
         checkManualFan.IsVisible = manualFan;
         labelManualFanHint.IsVisible = manualFan;
         checkManualFan.IsChecked = Fan.ManualFanService.Enabled;

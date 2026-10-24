@@ -218,6 +218,8 @@ int main(int argc, char **argv)
             return do_wmi_devs(argc, argv);
         if (strcmp(argv[1], "wmi-probe") == 0)
             return do_wmi_probe();
+        if (strcmp(argv[1], "ec-fanctl-n6506") == 0)
+            return do_n6506_fanctl();
         if (strcmp(argv[1], "ec-fanctl") == 0)
             return do_ec_fanctl();
         if (strcmp(argv[1], "msr-uv") == 0)

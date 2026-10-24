@@ -33,6 +33,7 @@ namespace GHelper.Linux
     internal static class App
     {
         public static IHardwareControl? Wmi => null;
+        public static IPowerManager? Power => null;
 
         // LinuxNvidiaGpuControl uses App.System?.ShowNotification(); null = no-op.
         public static ISystemIntegration? System => null;
@@ -44,5 +45,13 @@ namespace GHelper.Linux
         }
 
         public static ModeControlStub? Mode => null;
+    }
+}
+
+namespace GHelper.Linux.Mode
+{
+    public static class Modes
+    {
+        public static int GetCurrent() => Helpers.AppConfig.Get("performance_mode", 0);
     }
 }

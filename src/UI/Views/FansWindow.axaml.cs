@@ -81,6 +81,8 @@ public partial class FansWindow : Window
         Closing += (_, _) =>
         {
             _sensorTimer.Stop();
+            if (Fan.N6506FanService.IsSupported && Fan.N6506FanService.Calibrating)
+                Fan.N6506FanService.CancelMaximumTest();
             Fan.ManualFanService.StatusChanged -= OnManualFanStatus;
             if (App.Mode != null)
                 App.Mode.ModeApplied -= OnModeApplied;
@@ -93,6 +95,11 @@ public partial class FansWindow : Window
         {
             labelManualFanStatus.IsVisible = Fan.ManualFanService.Enabled;
             labelManualFanStatus.Text = text;
+            if (Fan.N6506FanService.IsSupported)
+            {
+                RefreshBoostButton();
+                buttonBoostOn.IsEnabled = buttonBoostOff.IsEnabled = !Fan.N6506FanService.Calibrating;
+            }
             UpdateDisabledState();
         });
     }
@@ -984,12 +991,15 @@ public partial class FansWindow : Window
             return;
 
         App.Mode?.SetPerformanceMode(modeId);
+        // Refresh immediately; ModeApplied arrives after background hardware work.
+        if (Fan.N6506FanService.IsSupported) LoadN6506Controls();
     }
 
     // Fan Curves
 
     private void LoadFanCurves()
     {
+        if (Fan.N6506FanService.IsSupported) { LoadN6506Controls(); return; }
         var wmi = App.Wmi;
         if (wmi == null)
             return;
@@ -1092,6 +1102,7 @@ public partial class FansWindow : Window
 
     private void OnCurveChanged(int fanIndex, byte[] curve)
     {
+        if (Fan.N6506FanService.IsSupported) { if (!_loadingN6506 && fanIndex is 0 or 1) Fan.N6506FanService.SaveCurve(fanIndex, curve, _n6506DisplayedMode); return; }
         // Save to config
         Helpers.AppConfig.SetFanConfig(fanIndex, curve);
 
@@ -1113,6 +1124,7 @@ public partial class FansWindow : Window
 
     private void ButtonApplyFans_Click(object? sender, RoutedEventArgs e)
     {
+        if (Fan.N6506FanService.IsSupported) { ApplyN6506Curves(); return; }
         var wmi = App.Wmi;
         if (wmi == null)
             return;
@@ -1156,6 +1168,7 @@ public partial class FansWindow : Window
 
     private void ButtonReset_Click(object? sender, RoutedEventArgs e)
     {
+        if (Fan.N6506FanService.IsSupported) { Fan.N6506FanService.ResetCurrentCurves(_n6506DisplayedMode); LoadN6506Controls(); return; }
         var wmi = App.Wmi;
 
         // Phase 1: Reset ALL fans to factory defaults (pwm_enable=3).
@@ -1211,6 +1224,7 @@ public partial class FansWindow : Window
 
     private void ButtonDisable_Click(object? sender, RoutedEventArgs e)
     {
+        if (Fan.N6506FanService.IsSupported) { Fan.N6506FanService.SetModeEnabled(_n6506DisplayedMode, false); Fan.N6506FanService.Sync(); LoadN6506Controls(); return; }
         var wmi = App.Wmi;
         if (wmi == null)
             return;
@@ -1226,6 +1240,7 @@ public partial class FansWindow : Window
 
     private void UpdateDisabledState()
     {
+        if (Fan.N6506FanService.IsSupported) { chartCPU.Disabled = false; chartGPU.Disabled = false; return; }
         var wmi = App.Wmi;
         // EC follower reads the curves from config, hwmon pwm_enable is moot
         bool manual = Fan.ManualFanService.Running;
@@ -1246,6 +1261,7 @@ public partial class FansWindow : Window
 
     private void CheckApplyFans_Changed(object? sender, RoutedEventArgs e)
     {
+        if (Fan.N6506FanService.IsSupported) { if (!_loadingN6506) { Fan.N6506FanService.SetModeEnabled(_n6506DisplayedMode, checkApplyFans.IsChecked == true); Fan.N6506FanService.Sync(true); LoadN6506Controls(); } return; }
         bool enabled = checkApplyFans.IsChecked ?? false;
         // LoadFanCurves sets IsChecked from config; only a real toggle goes on
         if (enabled == Helpers.AppConfig.IsMode("auto_apply_fans"))

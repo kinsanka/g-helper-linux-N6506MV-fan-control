@@ -68,6 +68,7 @@ int do_wmi_probe(void);
 
 /* ec_ops.c */
 int do_ec_fanctl(void);
+int do_n6506_fanctl(void);
 
 /* msr_ops.c */
 int do_msr_uv(int argc, char **argv);

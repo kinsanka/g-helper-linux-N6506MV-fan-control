@@ -65,6 +65,11 @@ public class FanCurveChart : Control
         set => SetValue(DisabledProperty, value);
     }
 
+    public static readonly StyledProperty<int> RpmScaleProperty = AvaloniaProperty.Register<FanCurveChart, int>(nameof(RpmScale), 0);
+    public int RpmScale { get => GetValue(RpmScaleProperty); set => SetValue(RpmScaleProperty, value); }
+    public int MinimumPercent { get; set; }
+    private string FormatFan(int percent) => RpmScale > 0 ? $"{percent * RpmScale / 100} RPM" : $"{percent}%";
+
     // Constants
 
     private const int PointCount = 8;
@@ -73,7 +78,7 @@ public class FanCurveChart : Control
     private const int FanMin = 0;
     private const int FanMax = 100;
     private const double PointRadius = 6;
-    private const double ChartMargin = 40; // Space for axis labels
+    private const double ChartMargin = 64; // Space for axis labels
 
     // State
 
@@ -97,7 +102,7 @@ public class FanCurveChart : Control
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
-        if (change.Property == CurveDataProperty || change.Property == DisabledProperty)
+        if (change.Property == CurveDataProperty || change.Property == DisabledProperty || change.Property == RpmScaleProperty)
             InvalidateVisual();
     }
 
@@ -188,7 +193,7 @@ public class FanCurveChart : Control
         for (int f = FanMin; f <= FanMax; f += 20)
         {
             double y = MapFanToY(f, area);
-            var text = new FormattedText($"{f}%",
+            var text = new FormattedText(FormatFan(f),
                 System.Globalization.CultureInfo.InvariantCulture,
                 FlowDirection.LeftToRight, typeface, 10, LabelBrush);
             context.DrawText(text, new Point(area.Left - text.Width - 4, y - text.Height / 2));
@@ -228,7 +233,7 @@ public class FanCurveChart : Control
             if (i == _dragIndex)
             {
                 var tipText = new FormattedText(
-                    $"{Helpers.TempHelper.FormatTemp(data[i])} → {data[8 + i]}%",
+                    $"{Helpers.TempHelper.FormatTemp(data[i])} → {FormatFan(data[8 + i])}",
                     System.Globalization.CultureInfo.InvariantCulture,
                     FlowDirection.LeftToRight,
                     new Typeface("Segoe UI, Ubuntu, sans-serif"),
@@ -279,7 +284,7 @@ public class FanCurveChart : Control
             temp = Math.Min(temp, data[_dragIndex + 1] - 1);
 
         temp = Math.Clamp(temp, TempMin, TempMax);
-        fan = Math.Clamp(fan, FanMin, FanMax);
+        fan = Math.Clamp(fan, MinimumPercent, FanMax);
 
         // SHIFT-drag: move all fan points by the same delta (upstream 667a3ea5)
         bool shiftHeld = (e.KeyModifiers & Avalonia.Input.KeyModifiers.Shift) != 0;
@@ -288,14 +293,14 @@ public class FanCurveChart : Control
             int delta = fan - data[8 + _dragIndex];
             for (int i = 0; i < PointCount; i++)
             {
-                int newFan = Math.Clamp(data[8 + i] + delta, FanMin, FanMax);
+                int newFan = Math.Clamp(data[8 + i] + delta, MinimumPercent, FanMax);
                 data[8 + i] = (byte)newFan;
             }
         }
         else
         {
             // Keep the curve monotonic non-decreasing.
-            int lo = FanMin, hi = FanMax;
+            int lo = MinimumPercent, hi = FanMax;
             if (_dragIndex > 0)
                 lo = data[8 + _dragIndex - 1];
             if (_dragIndex < PointCount - 1)

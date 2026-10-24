@@ -33,8 +33,10 @@ public static class ManualFanService
     private static Queue<int> _gpuWindow = new();
     private static int _tempFailures;
 
-    public static bool Enabled => AppConfig.Is(ConfigKey);
-    public static bool Running { get; private set; }
+    public static bool Enabled => N6506FanService.IsSupported || AppConfig.Is(ConfigKey);
+    private static bool _running;
+    public static bool Running { get => N6506FanService.IsSupported ? N6506FanService.Running : _running; private set => _running = value; }
+    static ManualFanService() => N6506FanService.StatusChanged += text => StatusChanged?.Invoke(text);
 
     /// <summary>Fans window text: duties while running, the reason when it
     /// could not start, "" when stopped.</summary>
@@ -45,6 +47,7 @@ public static class ManualFanService
     /// try sudo -n so no dialog pops at boot.</summary>
     public static void Sync(bool interactive = false)
     {
+        if (N6506FanService.IsSupported) { N6506FanService.Sync(interactive); return; }
         lock (_lock)
         {
             if (interactive)
@@ -101,6 +104,7 @@ public static class ManualFanService
     /// <summary>Stop and hand the fans back to the EC.</summary>
     public static void Stop()
     {
+        if (N6506FanService.IsSupported) { N6506FanService.Stop(); return; }
         lock (_lock)
         {
             if (!Running)

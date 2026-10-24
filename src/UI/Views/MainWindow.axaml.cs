@@ -467,7 +467,9 @@ public partial class MainWindow : Window
 
     private FansWindow? _fansWindow;
 
-    private void ButtonFans_Click(object? sender, RoutedEventArgs e)
+    private void ButtonFans_Click(object? sender, RoutedEventArgs e) => ShowFansWindow();
+
+    public void ShowFansWindow()
     {
         if (_fansWindow == null || !_fansWindow.IsVisible)
         {

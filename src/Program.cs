@@ -31,6 +31,9 @@ class Program
         if (args.Contains("--osk") && CommandIpc.TrySend("toggle-osk"))
             return;
 
+        if (args.Contains("--fans") && CommandIpc.TrySend("open-fans"))
+            return;
+
         // Last-resort logging: capture fatal exceptions to the log file before
         // the process dies (stderr is swallowed under Steam game mode).
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>

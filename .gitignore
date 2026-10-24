@@ -47,3 +47,5 @@ Desktop.ini
 # Python bytecode
 __pycache__/
 *.pyc
+# Generated native helper (embedded at build time)
+vendor/gpu-helper/gpu-helper

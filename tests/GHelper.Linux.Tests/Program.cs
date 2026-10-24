@@ -26,6 +26,8 @@ public static class Program
         {
             Scenarios.RunAll();
             ManualFanTests.RunAll();
+            N6506FanTests.RunAll();
+        N6506CalibrationTests.RunAll();
             XrandrPanelTests.RunAll();
         }
         finally

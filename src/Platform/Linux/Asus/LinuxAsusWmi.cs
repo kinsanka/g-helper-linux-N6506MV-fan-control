@@ -277,6 +277,7 @@ public class LinuxAsusWmi : IHardwareControl
 
     public int GetFanRpm(int fanIndex)
     {
+        if (Fan.N6506FanService.IsSupported && Fan.N6506FanService.CachedRpm(fanIndex) is int cached && cached >= 0) return cached;
         // Use the hwmon that has fan*_input files (RPM sensors)
         var hwmon = _asusFanRpmHwmonDir ?? _asusBaseHwmonDir;
         if (hwmon != null)
@@ -323,6 +324,7 @@ public class LinuxAsusWmi : IHardwareControl
 
     public byte[]? GetFanCurve(int fanIndex)
     {
+        if (Fan.N6506FanService.IsSupported) return fanIndex is 0 or 1 ? Fan.N6506FanService.Curve(fanIndex) : null;
         if (_asusFanCurveHwmonDir == null)
             return null;
 
@@ -376,6 +378,7 @@ public class LinuxAsusWmi : IHardwareControl
 
     public void SetFanCurve(int fanIndex, byte[] curve)
     {
+        if (Fan.N6506FanService.IsSupported) { if (fanIndex is 0 or 1) Fan.N6506FanService.SaveCurve(fanIndex, curve); return; }
         if (_asusFanCurveHwmonDir == null || curve.Length != 16)
             return;
 
@@ -404,6 +407,7 @@ public class LinuxAsusWmi : IHardwareControl
 
     public void DisableFanCurve(int fanIndex)
     {
+        if (Fan.N6506FanService.IsSupported) { Fan.N6506FanService.SetModeEnabled(Mode.Modes.GetCurrent(), false); Fan.N6506FanService.Sync(); return; }
         if (_asusFanCurveHwmonDir == null)
             return;
         int pwmIndex = fanIndex + 1;

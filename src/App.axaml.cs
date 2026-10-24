@@ -205,11 +205,16 @@ public class App : Application
             // the keyboard itself when this startup was osk-initiated.
             CommandIpc.StartServer(cmd =>
             {
+                if (cmd == "open-fans")
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => MainWindowInstance?.ShowFansWindow());
                 if (cmd == "toggle-osk")
                     Avalonia.Threading.Dispatcher.UIThread.Post(ToggleOskWindow);
             });
             if (oskStart)
                 Avalonia.Threading.Dispatcher.UIThread.Post(ToggleOskWindow);
+
+            if (desktop.Args?.Contains("--fans") == true)
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => MainWindowInstance?.ShowFansWindow());
 
             // Controller-driven focus navigation (game mode / handhelds).
             GHelper.Linux.Input.GamepadNav.Start();
