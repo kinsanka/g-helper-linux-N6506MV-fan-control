@@ -7,11 +7,11 @@ on:
     # Allow manual trigger from GitHub Actions UI
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  # First job: determine the version
   version:
+    name: Compute version
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.version.outputs.new_version }}
@@ -42,28 +42,21 @@ jobs:
           echo "New version: $NEW_VERSION"
           echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
 
-  # Build the native AOT binary
   build:
+    name: Build
     needs: [version]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Patch version in .csproj
+      - name: Stamp version in .csproj and udev rules
         run: |
           VERSION=${{ needs.version.outputs.new_version }}
           VERSION=${VERSION#v}
           sed -i "s|<Version>.*</Version>|<Version>${VERSION}</Version>|" src/GHelper.Linux.csproj
-          echo "Updated .csproj version to: ${VERSION}"
-          grep "<Version>" src/GHelper.Linux.csproj
-
-      - name: Stamp version in udev rules
-        run: |
-          VERSION=${{ needs.version.outputs.new_version }}
-          VERSION=${VERSION#v}
           sed -i "s/VERSION_PLACEHOLDER/${VERSION}/" install/90-ghelper.rules
-          echo "Updated udev rules version to: ${VERSION}"
+          grep "<Version>" src/GHelper.Linux.csproj
           grep "# Version:" install/90-ghelper.rules
 
       - name: Setup .NET 10
@@ -74,53 +67,11 @@ jobs:
       - name: Install Native AOT dependencies
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev libwayland-dev libpipewire-0.3-dev pkg-config
 
-      - name: Restore packages
-        run: dotnet restore src/ --runtime linux-x64
-
       - name: Build
         run: ./build.sh
 
       - name: Verify embedded resources
-        run: |
-          set -e
-          cd dist
-          # Resources the binary must embed (LogicalName from csproj).
-          # A missing or zero-size embed here means the build silently produced
-          # a non-functional binary (catches cc failure, missing dev headers,
-          # MSBuild Condition cache poisoning, etc).
-          EXPECTED=(
-            gpu-helper
-            ryzenadj
-            gpu-block-helper.sh
-            ghelper-gpu-boot.sh
-            90-ghelper.rules
-            libSkiaSharp.so
-            libHarfBuzzSharp.so
-            ghelper-audio
-            wlr-randr
-          )
-          for res in "${EXPECTED[@]}"; do
-            out="/tmp/smoke-${res}"
-            rm -f "$out"
-            if ! ./ghelper --extract-helper "$res" "$out" >/dev/null 2>&1; then
-              echo "ERROR: embedded resource '$res' not found in binary"
-              exit 1
-            fi
-            size=$(stat -c%s "$out")
-            if (( size < 100 )); then
-              echo "ERROR: embedded resource '$res' is suspiciously small ($size bytes)"
-              exit 1
-            fi
-            echo "  ok: $res ($size bytes)"
-          done
-          # Helper binaries must be valid ELF executables (not placeholders).
-          for bin in gpu-helper ryzenadj; do
-            if ! file "/tmp/smoke-${bin}" | grep -q "ELF.*executable"; then
-              echo "ERROR: ${bin} is not a valid ELF executable"
-              exit 1
-            fi
-          done
-          echo "All embedded resources verified"
+        run: ./scripts/verify-embedded.sh
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
@@ -128,14 +79,8 @@ jobs:
           name: ghelper
           path: dist/ghelper
 
-      - name: Upload udev rules artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: udev-rules
-          path: install/90-ghelper.rules
-
-  # Build AppImage from compiled artifacts
   appimage:
+    name: AppImage
     needs: [build]
     runs-on: ubuntu-latest
     steps:
@@ -146,38 +91,13 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: ghelper
-          path: artifacts/ghelper
+          path: dist
 
       - name: Install libfuse2
         run: sudo apt-get update && sudo apt-get install -y libfuse2
 
-      - name: Download appimagetool
-        run: |
-          curl -fsSL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" \
-            -o appimagetool
-          chmod +x appimagetool
-
-      - name: Assemble AppDir
-        run: |
-          mkdir -p GHelper.AppDir/usr/bin
-
-          cp artifacts/ghelper/ghelper             GHelper.AppDir/usr/bin/
-          chmod +x GHelper.AppDir/usr/bin/ghelper
-
-          # Desktop entry at AppDir root (required by appimagetool)
-          cp install/ghelper.desktop GHelper.AppDir/ghelper.desktop
-
-          # Icon at AppDir root (must match Icon= in .desktop file)
-          cp install/ghelper.png GHelper.AppDir/ghelper.png
-
-          # AppRun entry point
-          printf '#!/bin/bash\nHERE="$(dirname "$(readlink -f "$0")")"\nexec "$HERE/usr/bin/ghelper" "$@"\n' > GHelper.AppDir/AppRun
-          chmod +x GHelper.AppDir/AppRun
-
       - name: Build AppImage
-        run: |
-          export ARCH=x86_64
-          ./appimagetool GHelper.AppDir GHelper-x86_64.AppImage
+        run: ./build-appimage.sh
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v7
@@ -185,10 +105,12 @@ jobs:
           name: appimage
           path: GHelper-x86_64.AppImage
 
-  # Create release with all artifacts
   release:
+    name: Publish release
     needs: [version, build, appimage]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -218,7 +140,6 @@ jobs:
           mkdir -p release
           cp artifacts/ghelper/ghelper release/
           cp artifacts/appimage/GHelper-x86_64.AppImage release/
-          cp artifacts/udev-rules/90-ghelper.rules release/
           chmod +x release/ghelper
           chmod +x release/GHelper-x86_64.AppImage
           ls -la release/
@@ -269,17 +190,9 @@ jobs:
             ./ghelper
             ```
 
-            > **Note:** udev rules are required for hardware access without root. The quick install script handles this automatically. For AppImage or manual installs:
-            >
-            > ```bash
-            > sudo curl -sL https://github.com/${{ github.repository }}/releases/download/${{ needs.version.outputs.new_version }}/90-ghelper.rules -o /etc/udev/rules.d/90-ghelper.rules
-            > sudo udevadm control --reload-rules && sudo udevadm trigger
-            > ```
-
             ---
             *Auto-generated release from commit ${{ github.sha }}*
           files: |
             release/ghelper
             release/GHelper-x86_64.AppImage
-            release/90-ghelper.rules
           generate_release_notes: true

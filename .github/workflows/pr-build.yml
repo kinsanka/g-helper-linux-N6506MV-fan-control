@@ -44,9 +44,6 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v21
 
-      - name: Nix store cache
-        uses: DeterminateSystems/magic-nix-cache-action@v14
-
       # Full build: catches stale deps.json, SDK fallback-package collisions
       # and fetchNupkg patchelf breakage that a plain dotnet restore misses.
       - name: Build ghelper flake package
@@ -68,19 +65,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Patch version in .csproj
+      - name: Stamp version in .csproj and udev rules
         run: |
           SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
           VERSION="0.0.0-pr.${{ github.event.pull_request.number }}.${SHORT_SHA}"
           sed -i "s|<Version>.*</Version>|<Version>${VERSION}</Version>|" src/GHelper.Linux.csproj
-          echo "Set version to: ${VERSION}"
-
-      - name: Stamp version in udev rules
-        run: |
-          SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
-          VERSION="0.0.0-pr.${{ github.event.pull_request.number }}.${SHORT_SHA}"
           sed -i "s/VERSION_PLACEHOLDER/${VERSION}/" install/90-ghelper.rules
-          echo "Updated udev rules version to: ${VERSION}"
+          echo "Set version to: ${VERSION}"
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v6
@@ -90,75 +81,17 @@ jobs:
       - name: Install Native AOT dependencies
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev libwayland-dev libpipewire-0.3-dev pkg-config
 
-      - name: Restore packages
-        run: dotnet restore src/ --runtime linux-x64
-
       - name: Build
         run: ./build.sh
 
       - name: Verify embedded resources
-        run: |
-          set -e
-          cd dist
-          # Resources the binary must embed (LogicalName from csproj).
-          # A missing or zero-size embed here means the build silently produced
-          # a non-functional binary (catches cc failure, missing dev headers,
-          # MSBuild Condition cache poisoning, etc).
-          EXPECTED=(
-            gpu-helper
-            ryzenadj
-            gpu-block-helper.sh
-            ghelper-gpu-boot.sh
-            90-ghelper.rules
-            libSkiaSharp.so
-            libHarfBuzzSharp.so
-            ghelper-audio
-            wlr-randr
-          )
-          for res in "${EXPECTED[@]}"; do
-            out="/tmp/smoke-${res}"
-            rm -f "$out"
-            if ! ./ghelper --extract-helper "$res" "$out" >/dev/null 2>&1; then
-              echo "ERROR: embedded resource '$res' not found in binary"
-              exit 1
-            fi
-            size=$(stat -c%s "$out")
-            if (( size < 100 )); then
-              echo "ERROR: embedded resource '$res' is suspiciously small ($size bytes)"
-              exit 1
-            fi
-            echo "  ok: $res ($size bytes)"
-          done
-          # Helper binaries must be valid ELF executables (not placeholders).
-          for bin in gpu-helper ryzenadj; do
-            if ! file "/tmp/smoke-${bin}" | grep -q "ELF.*executable"; then
-              echo "ERROR: ${bin} is not a valid ELF executable"
-              exit 1
-            fi
-          done
-          echo "All embedded resources verified"
+        run: ./scripts/verify-embedded.sh
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
         with:
           name: ghelper
           path: dist/ghelper
-          retention-days: 7
-
-      - name: Upload udev rules artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: udev-rules
-          path: install/90-ghelper.rules
-          retention-days: 7
-
-      - name: Upload GPU boot files artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: gpu-boot-files
-          path: |
-            install/ghelper-gpu-boot.sh
-            install/ghelper-gpu-boot.service
           retention-days: 7
 
       - name: Save PR metadata
@@ -184,34 +117,13 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: ghelper
-          path: artifacts/ghelper
+          path: dist
 
       - name: Install libfuse2
         run: sudo apt-get update && sudo apt-get install -y libfuse2
 
-      - name: Download appimagetool
-        run: |
-          curl -fsSL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" \
-            -o appimagetool
-          chmod +x appimagetool
-
-      - name: Assemble AppDir
-        run: |
-          mkdir -p GHelper.AppDir/usr/bin
-
-          cp artifacts/ghelper/ghelper             GHelper.AppDir/usr/bin/
-          chmod +x GHelper.AppDir/usr/bin/ghelper
-
-          cp install/ghelper.desktop GHelper.AppDir/ghelper.desktop
-          cp install/ghelper.png GHelper.AppDir/ghelper.png
-
-          printf '#!/bin/bash\nHERE="$(dirname "$(readlink -f "$0")")"\nexec "$HERE/usr/bin/ghelper" "$@"\n' > GHelper.AppDir/AppRun
-          chmod +x GHelper.AppDir/AppRun
-
       - name: Build AppImage
-        run: |
-          export ARCH=x86_64
-          ./appimagetool GHelper.AppDir GHelper-x86_64.AppImage
+        run: ./build-appimage.sh
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v7

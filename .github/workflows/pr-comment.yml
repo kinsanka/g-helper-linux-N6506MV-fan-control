@@ -50,11 +50,8 @@ jobs:
         run: |
           mkdir -p bundle
           cp artifacts/ghelper/ghelper                       bundle/
-          cp artifacts/udev-rules/90-ghelper.rules           bundle/
-          cp artifacts/gpu-boot-files/ghelper-gpu-boot.sh    bundle/
-          cp artifacts/gpu-boot-files/ghelper-gpu-boot.service bundle/
           cp artifacts/appimage/GHelper-x86_64.AppImage      bundle/
-          chmod +x bundle/ghelper bundle/GHelper-x86_64.AppImage bundle/ghelper-gpu-boot.sh
+          chmod +x bundle/ghelper bundle/GHelper-x86_64.AppImage
 
       - name: Upload combined artifact
         uses: actions/upload-artifact@v7
@@ -99,9 +96,6 @@ jobs:
               '|------|-------------|',
               '| `GHelper-x86_64.AppImage` | All-in-one AppImage (easiest to run) |',
               '| `ghelper` | Native AOT binary (self-contained, native libs embedded) |',
-              '| `90-ghelper.rules` | Udev rules for hardware access without sudo |',
-              '| `ghelper-gpu-boot.sh` | GPU mode boot script (applies Eco/Standard before display manager) |',
-              '| `ghelper-gpu-boot.service` | Systemd service for GPU boot script |',
               '',
               '---',
               '',
@@ -120,24 +114,6 @@ jobs:
               '```bash',
               'chmod +x ghelper',
               './ghelper',
-              '```',
-              '',
-              '**Install udev rules (required for hardware access):**',
-              '```bash',
-              'sudo cp 90-ghelper.rules /etc/udev/rules.d/',
-              'sudo udevadm control --reload-rules && sudo udevadm trigger',
-              '```',
-              '',
-              '> **Note:** Without udev rules, ghelper needs `sudo` to access fan curves, performance modes, keyboard backlight, etc.',
-              '',
-              '**Install GPU boot service (required for GPU mode switching across reboots):**',
-              '```bash',
-              'sudo mkdir -p /usr/local/lib/ghelper',
-              'sudo cp ghelper-gpu-boot.sh /usr/local/lib/ghelper/',
-              'sudo chmod 755 /usr/local/lib/ghelper/ghelper-gpu-boot.sh',
-              'sudo cp ghelper-gpu-boot.service /etc/systemd/system/',
-              'sudo systemctl daemon-reload',
-              'sudo systemctl enable ghelper-gpu-boot.service',
               '```',
               '',
               `> Artifacts expire in 7 days.`,

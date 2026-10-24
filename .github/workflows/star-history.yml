@@ -3,8 +3,6 @@ name: Star History
 on:
   schedule:
     - cron: '0 0 * * 0'  # weekly, Sunday midnight UTC
-  watch:
-    types: [started]
   workflow_dispatch:
 
 permissions:
