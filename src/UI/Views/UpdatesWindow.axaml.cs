@@ -620,7 +620,7 @@ public partial class UpdatesWindow : Window
                     {
                         btnUpdate.IsEnabled = false;
                         btnUpdate.Content = Labels.Get("downloading");
-                        await Task.Run(async () => await DownloadAndInstallUpdate(release, btnUpdate));
+                        await DownloadAndInstallUpdate(release, btnUpdate);
                     };
                     btnRow.Children.Add(btnUpdate);
 
@@ -678,6 +678,7 @@ public partial class UpdatesWindow : Window
 
     internal static async Task DownloadAndInstallUpdate(ForkRelease release, Button btn)
     {
+        Dispatcher.UIThread.VerifyAccess();
         if (btn.Tag is ReadyUpdate ready)
         {
             Dispatcher.UIThread.Post(() => RestartUpdatedApplication(ready.Path));
@@ -1481,7 +1482,7 @@ public partial class UpdatesWindow : Window
             btnLater.IsEnabled = false;
             dontShow.IsEnabled = false;
             btnUpdate.Content = Labels.Get("downloading");
-            await Task.Run(async () => await DownloadAndInstallUpdate(release, btnUpdate));
+            await DownloadAndInstallUpdate(release, btnUpdate);
             btnLater.IsEnabled = true;
         };
 
