@@ -137,7 +137,7 @@ public class LinuxSystemIntegration : ISystemIntegration
     internal static string ResolveLauncherExecField()
     {
         var path = ResolveLauncherExec();
-        return path.Contains(' ') ? $"\"{path}\"" : path;
+        return GHelper.Linux.Install.AppImageUserInstall.QuoteDesktopExec(path);
     }
 
     /// <summary>

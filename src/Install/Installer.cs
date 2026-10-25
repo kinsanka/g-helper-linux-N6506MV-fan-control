@@ -171,6 +171,7 @@ public static partial class Installer
     {
         string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         string autostart = Path.Combine(home, ".config", "autostart", "ghelper.desktop");
+        bool userDesktop = ImmutableOs.IsImmutable || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("APPIMAGE"));
 
         return
         [
@@ -246,24 +247,24 @@ public static partial class Installer
             {
                 Id = "desktop", NameKey = "sysfiles_name_desktop",
                 Resource = "ghelper.desktop",
-                Dest = ImmutableOs.IsImmutable
+                Dest = userDesktop
                     ? ImmutableOs.UserDesktopPath()
                     : "/usr/share/applications/ghelper.desktop",
                 Mode = M644,
-                RootRequired = !ImmutableOs.IsImmutable,
-                RootOwned = !ImmutableOs.IsImmutable,
+                RootRequired = !userDesktop,
+                RootOwned = !userDesktop,
                 Post = [PostDesktopDb],
             },
             new ManagedFile
             {
                 Id = "icon", NameKey = "sysfiles_name_icon",
                 Resource = "ghelper.png",
-                Dest = ImmutableOs.IsImmutable
+                Dest = userDesktop
                     ? ImmutableOs.UserIconPath()
                     : "/usr/share/icons/hicolor/256x256/apps/ghelper.png",
                 Mode = M644,
-                RootRequired = !ImmutableOs.IsImmutable,
-                RootOwned = !ImmutableOs.IsImmutable,
+                RootRequired = !userDesktop,
+                RootOwned = !userDesktop,
                 Post = [PostIconCache],
             },
             new ManagedFile

@@ -11,14 +11,16 @@ set -euo pipefail
 #   ./build-appimage.sh
 #
 # Output:
-#   GHelper-x86_64.AppImage
+#   GHelper-N6506MV-x86_64.AppImage
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DIST_DIR="$SCRIPT_DIR/dist"
+DIST_DIR="${GHELPER_DIST_DIR:-$SCRIPT_DIR/dist}"
 INSTALL_DIR="$SCRIPT_DIR/install"
 APPDIR="$SCRIPT_DIR/GHelper.AppDir"
-OUTPUT="$SCRIPT_DIR/GHelper-x86_64.AppImage"
+OUTPUT="$SCRIPT_DIR/GHelper-N6506MV-x86_64.AppImage"
 APPIMAGETOOL="$SCRIPT_DIR/appimagetool"
+BUILD_OUTPUT="$OUTPUT.build-$$"
+trap 'rm -f "$BUILD_OUTPUT"' EXIT
 
 echo "=== G-Helper AppImage Build ==="
 echo ""
@@ -81,7 +83,11 @@ cp "$INSTALL_DIR/ghelper.appdata.xml" "$APPDIR/usr/share/metainfo/"
 cat > "$APPDIR/AppRun" << 'APPRUN'
 #!/bin/bash
 HERE="$(dirname "$(readlink -f "$0")")"
-exec "$HERE/usr/bin/ghelper" "$@"
+case "${1:-}" in
+    --version|--extract-helper|--install-gpu-helper|--apply-system-files|--remove-system-files)
+        exec "$HERE/usr/bin/ghelper" "$@" ;;
+    *) exec "$HERE/usr/bin/ghelper" --install-appimage "$@" ;;
+esac
 APPRUN
 chmod +x "$APPDIR/AppRun"
 
@@ -94,11 +100,13 @@ export ARCH=x86_64
 
 # appimagetool itself is an AppImage — if FUSE is not available, extract and run
 if "$APPIMAGETOOL" --version &>/dev/null 2>&1; then
-    "$APPIMAGETOOL" --no-appstream "$APPDIR" "$OUTPUT"
+    "$APPIMAGETOOL" --no-appstream "$APPDIR" "$BUILD_OUTPUT"
 else
     echo "  (FUSE not available, using --appimage-extract-and-run)"
-    "$APPIMAGETOOL" --no-appstream --appimage-extract-and-run "$APPDIR" "$OUTPUT"
+    "$APPIMAGETOOL" --no-appstream --appimage-extract-and-run "$APPDIR" "$BUILD_OUTPUT"
 fi
+
+mv -f "$BUILD_OUTPUT" "$OUTPUT"
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
@@ -118,6 +126,5 @@ echo "Run it:"
 echo "  chmod +x $APPIMAGE_NAME"
 echo "  ./$APPIMAGE_NAME"
 echo ""
-echo "Note: udev rules are still required for hardware access."
-echo "  sudo curl -sL https://raw.githubusercontent.com/utajum/g-helper-linux/master/install/90-ghelper.rules -o /etc/udev/rules.d/90-ghelper.rules"
-echo "  sudo udevadm control --reload-rules && sudo udevadm trigger"
+echo "First launch installs to ~/Applications and adds the application menu entry."
+echo "The app prompts for any required hardware helper setup."

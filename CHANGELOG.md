@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.0.97-n6506.5 (2026-10-25)
+
+- Add a native Linux AppImage with per-user installation and application menu registration.
+- Preserve existing fan curves and shared hardware calibration on installation and updates.
+- Check releases from kinsanka/g-helper-linux-N6506MV-fan-control and select the matching AppImage or native executable.
+- Verify SHA256 before replacement, stage files beside the application, and retain the previous executable as a backup.
+- Handle Bazzite home-directory aliases to prevent repeated installation.
+- Add seven installation and update scenarios; all 169 C# scenarios pass.
+
 ## [Unreleased]
 
 ### Added

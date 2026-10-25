@@ -2,7 +2,7 @@
 
 基于 [utajum/g-helper-linux](https://github.com/utajum/g-helper-linux) 的机型专用 fork，保留上游功能与提交历史，增加 N6506MV 风扇控制和完整校准。
 
-- 版本：`1.0.97-n6506.4`；开发分支：`main`。
+- 版本：`1.0.97-n6506.5`；开发分支：`main`。
 - 已实测：ASUS Vivobook Pro 15 N6506MV、BIOS `N6506MV.313`、Core Ultra 9 185H、RTX 4060 Laptop、Bazzite Linux。
 - 专用后端严格检查机型、BIOS、控制表版本18和双风扇，其他机型不启用该后端。
 
@@ -26,11 +26,22 @@
 
 **关闭曲线或退出程序，目前保持已验证的高风量，尚未完成可靠的固件自动温控交接。** 专用后端不写风扇模式寄存器，不使用此前在该机器上导致停扇的模式0。真正休眠/唤醒尚未完成实机验证。
 
-此版本的上游自动更新功能仍指向原项目，请通过本fork发布包手动更新，避免用原版覆盖专用风扇功能。CPU降压选项出现不代表固件实际支持；185H的负电压偏移尚未验证。功耗滑块显示也不应替代硬件读回。
+更新检测指向本fork的GitHub Releases，按当前运行格式下载对应文件，校验SHA256后替换，并保留上一版`.bak`；不会用上游原版覆盖本机型功能。CPU降压选项出现不代表固件实际支持；185H的负电压偏移尚未验证。功耗滑块显示也不应替代硬件读回。
 
 ## 下载与构建
 
-Linux x64发布包自带运行时：解压后保留整个目录，以普通用户运行`./ghelper`，无需.NET SDK。首次运行按应用提示安装辅助程序；启动前退出其他G-Helper或风扇控制程序。
+推荐下载[最新版本](https://github.com/kinsanka/g-helper-linux-N6506MV-fan-control/releases/latest)中的`GHelper-N6506MV-x86_64.AppImage`。AppImage是Linux应用格式，无需解压或安装.NET运行时。
+
+下载后在文件属性中允许执行，双击启动；也可运行：
+
+```bash
+chmod +x GHelper-N6506MV-x86_64.AppImage
+./GHelper-N6506MV-x86_64.AppImage
+```
+
+首次启动会将程序安装到`~/Applications/`并添加应用菜单入口，原有配置与校准表继续使用。使用普通用户运行，按应用提示安装硬件辅助程序；启动前退出其他G-Helper或风扇控制程序。发布页另提供原生单文件`ghelper`供手动安装，`SHA256SUMS`用于校验下载文件。应用内更新检查只使用本仓库的发布包，更新完成后点击重启。
+
+AppImage需要系统支持FUSE；此版本已在Bazzite实机验证。
 
 源码构建需要.NET10 SDK及上游原生构建依赖：
 
@@ -50,7 +61,7 @@ cc -O2 -Wall -Wextra -Werror -DN6506_TEST vendor/gpu-helper/n6506_fan.c -o /tmp/
 python3 tests/n6506-helper-protocol.py /tmp/n6506-helper-tests
 ```
 
-162项C#测试通过；原生模拟测试覆盖普通零控制量拒绝、顺序归零、其他通道保持0、退出恢复高风量、独立档位截止时间和失联保护。模拟测试不会访问真实风扇。
+169项C#测试通过（包括安装位置、更新版本、校验和、文件替换与配置保留）；原生模拟测试覆盖普通零控制量拒绝、顺序归零、其他通道保持0、退出恢复高风量、独立档位截止时间和失联保护。模拟测试不会访问真实风扇。
 
 ## 代码与许可
 

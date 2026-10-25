@@ -12,6 +12,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using GHelper.Linux.I18n;
 using GHelper.Linux.Install;
+using GHelper.Linux.Updates;
 using GHelper.Linux.Platform.Linux;
 
 namespace GHelper.Linux.UI.Views;
@@ -52,7 +53,7 @@ public partial class UpdatesWindow : Window
         "ROG Font V1.5",
     };
 
-    private const string GitHubRepo = "utajum/g-helper-linux";
+    private const string GitHubRepo = ForkRelease.Repository;
 
     private string? _model;
     private string? _biosVersion;
@@ -579,36 +580,16 @@ public partial class UpdatesWindow : Window
             http.DefaultRequestHeaders.Add("User-Agent", "G-Helper-Linux/" + Helpers.AppConfig.AppVersion);
             http.Timeout = TimeSpan.FromSeconds(10);
 
-            // GitHub API: get latest release
-            var json = await http.GetStringAsync($"https://api.github.com/repos/{GitHubRepo}/releases/latest");
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            var tagName = root.GetProperty("tag_name").GetString() ?? "";
-            var latestVersion = tagName.TrimStart('v');
-            var releaseUrl = root.GetProperty("html_url").GetString() ?? $"https://github.com/{GitHubRepo}/releases/latest";
-
-            // Pick the right asset: AppImage when running as AppImage, bare binary otherwise
-            string targetAsset = IsAppImage ? "GHelper-x86_64.AppImage" : "ghelper";
-            var downloadUrl = $"https://github.com/{GitHubRepo}/releases/latest/download/{targetAsset}";
-            if (root.TryGetProperty("assets", out var assets))
-            {
-                for (int i = 0; i < assets.GetArrayLength(); i++)
-                {
-                    var name = assets[i].GetProperty("name").GetString() ?? "";
-                    if (name == targetAsset)
-                    {
-                        downloadUrl = assets[i].GetProperty("browser_download_url").GetString() ?? downloadUrl;
-                        break;
-                    }
-                }
-            }
+            var release = await ForkRelease.LatestAsync(http, IsAppImage);
+            var latestVersion = release.Version;
+            var releaseUrl = release.PageUrl;
 
             var isNewer = CompareVersions(latestVersion, Helpers.AppConfig.AppVersion) > 0;
 
             Dispatcher.UIThread.Post(() =>
             {
                 panelSelfUpdate.Children.Clear();
+                panelSelfUpdate.Children.Add(new TextBlock { Text = "更新源：" + GitHubRepo, Foreground = ColorDim, FontSize = 11, TextWrapping = TextWrapping.Wrap });
 
                 if (isNewer)
                 {
@@ -631,8 +612,7 @@ public partial class UpdatesWindow : Window
 
                     var btnUpdate = new Button
                     {
-                        Content = Platform.Linux.NixOS.IsNixOS
-                            ? Labels.Get("update_nixos_button") : Labels.Get("download_install"),
+                        Content = release.Asset == null ? Labels.Get("view_release") : Labels.Get("download_install"),
                         MinWidth = 130,
                         Foreground = ColorWhite,
                     };
@@ -640,7 +620,7 @@ public partial class UpdatesWindow : Window
                     {
                         btnUpdate.IsEnabled = false;
                         btnUpdate.Content = Labels.Get("downloading");
-                        await Task.Run(async () => await DownloadAndInstallUpdate(downloadUrl, btnUpdate));
+                        await Task.Run(async () => await DownloadAndInstallUpdate(release, btnUpdate));
                     };
                     btnRow.Children.Add(btnUpdate);
 
@@ -694,22 +674,32 @@ public partial class UpdatesWindow : Window
         }
     }
 
-    internal static async Task DownloadAndInstallUpdate(string downloadUrl, Button btn)
+    private sealed record ReadyUpdate(string Path);
+
+    internal static async Task DownloadAndInstallUpdate(ForkRelease release, Button btn)
     {
-        // NixOS: the binary is in the read-only /nix/store and can't be
-        // replaced in place; a generic binary wouldn't run anyway. Updating
-        // goes through nixos-rebuild instead - see RunNixOSUpdate.
-        if (Platform.Linux.NixOS.IsNixOS)
+        if (btn.Tag is ReadyUpdate ready)
         {
-            await RunNixOSUpdate(btn);
+            Dispatcher.UIThread.Post(() => RestartUpdatedApplication(ready.Path));
             return;
         }
+        if (release.Asset == null || (Platform.Linux.NixOS.IsNixOS && !IsAppImage))
+        {
+            Process.Start(new ProcessStartInfo(release.PageUrl) { UseShellExecute = true });
+            Dispatcher.UIThread.Post(() => { btn.Content = Labels.Get("view_release"); btn.IsEnabled = true; });
+            return;
+        }
+        string downloadUrl = release.Asset.Url;
+        string? downloadTemp = null;
 
         try
         {
             using var http = new HttpClient();
             http.DefaultRequestHeaders.Add("User-Agent", "G-Helper-Linux/" + Helpers.AppConfig.AppVersion);
             http.Timeout = TimeSpan.FromMinutes(5);
+
+            string checksumText = await http.GetStringAsync(release.ChecksumUrl);
+            string expectedChecksum = ForkRelease.FindChecksum(checksumText, release.Asset.Name)!;
 
             // Determine the target path to replace
             string? targetPath;
@@ -729,7 +719,8 @@ public partial class UpdatesWindow : Window
                 tmpFileName = "ghelper-update";
             }
 
-            var tmpPath = Path.Combine(Path.GetTempPath(), tmpFileName);
+            var tmpPath = Path.Combine(Path.GetTempPath(), tmpFileName + "." + Guid.NewGuid().ToString("N"));
+            downloadTemp = tmpPath;
 
             // Download with progress reporting
             using (var response = await http.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
@@ -760,6 +751,9 @@ public partial class UpdatesWindow : Window
                 }
             }
 
+            ForkRelease.VerifyFile(tmpPath, expectedChecksum);
+            Helpers.Logger.WriteLine("Self-update: verified SHA256 for " + release.Asset.Name);
+
             // Make executable
 #pragma warning disable CA1416
             File.SetUnixFileMode(tmpPath,
@@ -771,29 +765,13 @@ public partial class UpdatesWindow : Window
 
             if (targetPath != null && File.Exists(targetPath))
             {
-                // Rename-then-place: Linux allows renaming a running executable
-                // (the process keeps using the old inode), but does NOT allow
-                // overwriting it directly ("Text file busy" / ETXTBSY).
-                var backupPath = targetPath + ".bak";
-                if (File.Exists(backupPath))
-                    File.Delete(backupPath);
-                File.Move(targetPath, backupPath);  // rename running file → .bak (allowed)
-                File.Move(tmpPath, targetPath);      // place new file at original path
-
-                var binaryDir = Path.GetDirectoryName(targetPath);
+                AtomicExecutableUpdate.Replace(tmpPath, targetPath);
                 var restartPath = targetPath;
-
                 Dispatcher.UIThread.Post(() =>
                 {
+                    btn.Tag = new ReadyUpdate(restartPath);
                     btn.Content = Labels.Get("restart_to_apply");
                     btn.IsEnabled = true;
-                    btn.Click -= null!; // clear old handlers
-                    btn.Click += (_, _) =>
-                    {
-                        Helpers.Logger.WriteLine($"Self-update: restarting via {restartPath}");
-                        Process.Start(new ProcessStartInfo(restartPath) { UseShellExecute = false });
-                        Environment.Exit(0);
-                    };
                 });
 
                 var mode = IsAppImage ? "AppImage" : "binary";
@@ -802,10 +780,11 @@ public partial class UpdatesWindow : Window
             else
             {
                 // Can't determine target path - save to downloads
-                var fileName = IsAppImage ? "GHelper-x86_64.AppImage" : "ghelper";
+                var fileName = release.Asset.Name;
                 var savePath = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                     "Downloads", fileName);
+                Directory.CreateDirectory(Path.GetDirectoryName(savePath)!);
                 File.Move(tmpPath, savePath, overwrite: true);
 
                 Dispatcher.UIThread.Post(() =>
@@ -819,13 +798,30 @@ public partial class UpdatesWindow : Window
         }
         catch (Exception ex)
         {
+            if (downloadTemp != null && File.Exists(downloadTemp))
+                try { File.Delete(downloadTemp); } catch { }
             Helpers.Logger.WriteLine($"Self-update download failed: {ex.Message}");
             Dispatcher.UIThread.Post(() =>
             {
                 btn.Content = Labels.Get("download_failed");
+                ToolTip.SetTip(btn, ex.Message);
                 btn.IsEnabled = true;
             });
         }
+    }
+
+    private static void RestartUpdatedApplication(string executable)
+    {
+        var start = new ProcessStartInfo("/bin/sh") { UseShellExecute = false };
+        start.ArgumentList.Add("-c");
+        start.ArgumentList.Add("while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; exec \"$2\"");
+        start.ArgumentList.Add("ghelper-update-restart");
+        start.ArgumentList.Add(Environment.ProcessId.ToString());
+        start.ArgumentList.Add(executable);
+        Process.Start(start);
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+            desktop.Shutdown();
+        else Environment.Exit(0);
     }
 
     /// <summary>
@@ -843,7 +839,7 @@ public partial class UpdatesWindow : Window
         });
 
         var (ok, log) = await Platform.Linux.NixOS.RunModuleUpdate(
-            $"https://raw.githubusercontent.com/{GitHubRepo}/master/install/install.sh",
+            $"https://raw.githubusercontent.com/{GitHubRepo}/main/install/install.sh",
             "G-Helper-Linux/" + Helpers.AppConfig.AppVersion);
 
         if (ok)
@@ -877,18 +873,7 @@ public partial class UpdatesWindow : Window
     /// </summary>
     private static int CompareVersions(string a, string b)
     {
-        var partsA = a.Split('.');
-        var partsB = b.Split('.');
-        var len = Math.Max(partsA.Length, partsB.Length);
-
-        for (int i = 0; i < len; i++)
-        {
-            int numA = i < partsA.Length && int.TryParse(partsA[i], out var na) ? na : 0;
-            int numB = i < partsB.Length && int.TryParse(partsB[i], out var nb) ? nb : 0;
-            if (numA != numB)
-                return numA - numB;
-        }
-        return 0;
+        return ForkRelease.CompareVersions(a, b);
     }
 
     private struct DriverInfo
@@ -1396,39 +1381,18 @@ public partial class UpdatesWindow : Window
                 http.DefaultRequestHeaders.Add("User-Agent", "G-Helper-Linux/" + Helpers.AppConfig.AppVersion);
                 http.Timeout = TimeSpan.FromSeconds(10);
 
-                var json = await http.GetStringAsync($"https://api.github.com/repos/{GitHubRepo}/releases/latest");
-                using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
-
-                var tagName = root.GetProperty("tag_name").GetString() ?? "";
-                var latestVersion = tagName.TrimStart('v');
-
-                if (CompareVersions(latestVersion, Helpers.AppConfig.AppVersion) <= 0)
-                    return;
-
-                string targetAsset = IsAppImage ? "GHelper-x86_64.AppImage" : "ghelper";
-                var downloadUrl = $"https://github.com/{GitHubRepo}/releases/latest/download/{targetAsset}";
-                if (root.TryGetProperty("assets", out var assets))
-                {
-                    for (int i = 0; i < assets.GetArrayLength(); i++)
-                    {
-                        var name = assets[i].GetProperty("name").GetString() ?? "";
-                        if (name == targetAsset)
-                        {
-                            downloadUrl = assets[i].GetProperty("browser_download_url").GetString() ?? downloadUrl;
-                            break;
-                        }
-                    }
-                }
+                var release = await ForkRelease.LatestAsync(http, IsAppImage);
+                var latestVersion = release.Version;
+                if (CompareVersions(latestVersion, Helpers.AppConfig.AppVersion) <= 0) return;
 
                 Helpers.Logger.WriteLine($"Startup update check: v{latestVersion} available (current v{Helpers.AppConfig.AppVersion})");
 
-                var dlUrl = downloadUrl;
+
                 Dispatcher.UIThread.Post(() =>
                 {
                     try
                     {
-                        ShowUpdatePrompt(owner, latestVersion, dlUrl);
+                        ShowUpdatePrompt(owner, latestVersion, release);
                     }
                     catch (Exception ex)
                     {
@@ -1443,7 +1407,7 @@ public partial class UpdatesWindow : Window
         });
     }
 
-    private static void ShowUpdatePrompt(Window owner, string latestVersion, string downloadUrl)
+    private static void ShowUpdatePrompt(Window owner, string latestVersion, ForkRelease release)
     {
         var dialog = new Window
         {
@@ -1495,8 +1459,7 @@ public partial class UpdatesWindow : Window
 
         var btnUpdate = new Button
         {
-            Content = Platform.Linux.NixOS.IsNixOS
-                ? Labels.Get("update_nixos_button") : Labels.Get("update_now"),
+            Content = release.Asset == null ? Labels.Get("view_release") : Labels.Get("update_now"),
             MinWidth = 130,
             Padding = new Avalonia.Thickness(14, 8),
             Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
@@ -1512,14 +1475,14 @@ public partial class UpdatesWindow : Window
         };
         btnLater.Click += (_, _) => dialog.Close();
 
-        var url = downloadUrl;
         btnUpdate.Click += async (_, _) =>
         {
             btnUpdate.IsEnabled = false;
             btnLater.IsEnabled = false;
             dontShow.IsEnabled = false;
             btnUpdate.Content = Labels.Get("downloading");
-            await Task.Run(async () => await DownloadAndInstallUpdate(url, btnUpdate));
+            await Task.Run(async () => await DownloadAndInstallUpdate(release, btnUpdate));
+            btnLater.IsEnabled = true;
         };
 
         var btnChangelog = new Button

@@ -18,6 +18,13 @@ class Program
 
         SetGpuPreferenceEnv();
 
+        if (GHelper.Linux.Install.AppImageUserInstall.Handle(ref args)) return;
+        if (args.FirstOrDefault() == "--version")
+        {
+            Console.WriteLine(AppConfig.AppVersion);
+            return;
+        }
+
         var rc = ResourceExtractorCli.TryDispatch(args);
         if (rc.HasValue)
         {

@@ -72,6 +72,9 @@
     <Compile Include="../../src/Fan/N6506FanPolicy.cs" />
     <Compile Include="../../src/Fan/N6506FanService.cs" />
     <Compile Include="../../src/Fan/N6506Calibration.cs" />
+    <Compile Include="../../src/Updates/ForkRelease.cs" />
+    <Compile Include="../../src/Updates/AtomicExecutableUpdate.cs" />
+    <Compile Include="../../src/Install/AppImageUserInstall.cs" />
     <Compile Include="../../src/Helpers/AppConfig.cs" />
     <Compile Include="../../src/Helpers/Logger.cs" />
     <Compile Include="../../src/Helpers/MemoryHelper.cs" />

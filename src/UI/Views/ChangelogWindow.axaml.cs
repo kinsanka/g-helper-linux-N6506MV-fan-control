@@ -16,9 +16,9 @@ namespace GHelper.Linux.UI.Views;
 public partial class ChangelogWindow : Window
 {
     private const string ChangelogUrl =
-        "https://raw.githubusercontent.com/utajum/g-helper-linux/master/CHANGELOG.md";
+        "https://raw.githubusercontent.com/kinsanka/g-helper-linux-N6506MV-fan-control/main/CHANGELOG.md";
     private const string ChangelogBrowserUrl =
-        "https://github.com/utajum/g-helper-linux/blob/master/CHANGELOG.md";
+        "https://github.com/kinsanka/g-helper-linux-N6506MV-fan-control/blob/main/CHANGELOG.md";
     private const string EmbeddedResourceName = "GHelper.Linux.CHANGELOG.md";
 
     private readonly List<Bitmap> _bitmapSink = new();
