@@ -5,8 +5,11 @@ using GHelper.Linux.Platform.Linux;
 namespace GHelper.Linux.Fan;
 
 /// <summary>
-/// N6506MV/BIOS313 only. Mode register is never written. Disabled/exit/error
-/// means known high cooling, not an unverified claim of firmware automatic mode.
+/// N6506MV/BIOS313 only. If the EC is in automatic mode (0) when the helper
+/// starts, the helper arms manual mode (1) on first control and releases it back
+/// to automatic when it exits (disable/app exit). An EC already in manual at
+/// start keeps the original behaviour: mode is never written and
+/// disabled/exit/error means known high cooling.
 /// The root helper owns a command watchdog and the shared EC-controller lock.
 /// </summary>
 public static class N6506FanService
