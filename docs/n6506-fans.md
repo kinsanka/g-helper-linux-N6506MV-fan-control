@@ -19,8 +19,8 @@ points per fan, in roughly4–6 minutes. A one-second response is not claimed to
 settled RPM. A second, monotone fit is used for RPM-to-duty inversion, with tach
 feedback correcting remaining error. Normal profile control keeps duty64..255.
 
-Only the time-bounded, strictly ordered calibration protocol accepts zero. No
-mode register is written. Start requires CPU/GPU below65°C; CPU/GPU75°C, missing
+Only the time-bounded, strictly ordered calibration protocol accepts zero. The
+mode register is only written as described under "EC mode handling". Start requires CPU/GPU below65°C; CPU/GPU75°C, missing
 CPU temperature, mode change, mismatched duty or communication failure aborts
 the run and returns high cooling. The native process independently checks CPU
 temperature, per-point and total deadlines and command heartbeats, including when
@@ -53,9 +53,28 @@ controller uses tach feedback, a nonzero duty floor and slow decreases.
 `ManualFanService` routes this model to `N6506FanService`. It uses the installed
 `gpu-helper ec-fanctl-n6506` over bounded request/response pipes. The native helper
 validates machine/BIOS/table/mode and shares `/run/lock/n6506-fan-control.lock`
-with the earlier temporary controller. It never writes register 0x31 and rejects
-legacy `auto`, ordinary zero-duty commands and arbitrary register commands.
-Zero duty is confined to the bounded calibration sequence.
+with the earlier temporary controller. It rejects legacy `auto`, ordinary
+zero-duty commands and arbitrary register commands. Zero duty is confined to the
+bounded calibration sequence.
+
+### EC mode handling
+
+Register 0x31 selects the fan controller: 0 = EC (firmware) curve, 1 = manual.
+On a freshly booted N6506MV / BIOS 313 the EC reports mode 0, which the identity
+check previously rejected (`err identity`), so the backend could not run unless
+another tool had left the EC in manual mode.
+
+- Identity accepts mode 0 or 1 and records the mode seen at session start.
+- Started in 0: probe/read sessions leave the EC alone. The first control
+  command reads the duty the EC curve is driving, writes mode 1 (verified by
+  readback) and holds those duties (floor 64) so there is no speed jump. If the
+  EC falls back to 0 mid-session (resume, EC reset), the next write re-arms it.
+  On exit (quit, EOF, signal, curve disabled) the helper writes mode 0 and
+  verifies it; if that fails it falls back to known high cooling.
+- Started in 1: unchanged legacy behaviour; mode is never written.
+
+Mode values other than 0/1 are never written, and mode writes are refused
+entirely in sessions that started in manual.
 
 Above the temperature threshold the app requests full cooling and keeps
 monitoring. It returns to the curve after cooling, rather than exiting at a hot
@@ -63,8 +82,12 @@ sample. Missing GPU temperature falls back to CPU temperature. Lost/partial
 heartbeats, EOF, logout and shutdown request known high cooling. Logging in
 starts GHelper through its existing autostart and reapplies the selected profile.
 
-**Disabled curves and app exit currently mean high cooling, not a verified
-firmware-automatic handoff.** Mode0 previously stopped fans on this machine.
+**When the EC started in automatic mode, disabled curves and app exit hand the
+fans back to the EC curve** (verified on hardware: after release the EC lowered
+duty on its own, 153 → 132). When the EC started in manual mode they still mean
+high cooling. Note: the EC curve may legitimately run fans slowly or stop them
+at low temperature; an earlier report that "Mode0 stopped fans" may reflect
+that idle behaviour rather than a fault.
 True suspend/resume remains untested; logout is not suspend. Software cannot
 provide recovery guarantees if the EC or kernel fails.
 
@@ -77,7 +100,9 @@ local deliverable was published self-contained without AOT.
 
 Run the existing C# scenario suite, which now includes N6506 policy/config cases.
 Compile `n6506_fan.c` with `-DN6506_TEST` for simulated transport tests; its
-`--simulate` mode never accesses hardware and is used by the line-protocol test.
+`--simulate` (EC starts in manual) and `--simulate-auto` (EC starts in automatic)
+modes never access hardware and are used by the line-protocol test
+(`python3 tests/n6506-helper-protocol.py <test-binary>`).
 Normal application builds never enable the simulation switch.
 
 Protocol reference: https://github.com/Keyitdev/asus-fan-control-ec/blob/master/HOW-IT-WORKS.md

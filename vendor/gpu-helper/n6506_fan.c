@@ -1,5 +1,10 @@
-/* Bounded N6506MV test. Never writes mode register 0x31.
- * Only selector 0x32 and duty 0x35 can be written; zero is confined to bounded calibration.
+/* Bounded N6506MV test.
+ * Writable: selector 0x32, duty 0x35 and mode 0x31 (0 = EC curve, 1 = manual).
+ * Mode is only written when the session started with the EC in automatic mode
+ * (mode 0, the factory/boot state): it is armed to manual on first fan control
+ * and released back to 0 on exit. An EC already in manual at start keeps the
+ * original behaviour (mode never written, exit means high cooling).
+ * Zero duty is confined to bounded calibration.
  * Exact machine/BIOS/table guards, saved-duty restoration, signal handling.
  * Protocol: Keyitdev/asus-fan-control-ec/HOW-IT-WORKS.md.
  * N6506_TEST builds have simulated self-tests; normal operation uses bounded stdin requests.
@@ -24,6 +29,9 @@ static int mock, mock_mode = 1, mock_version = 18, mock_count = 2;
 static int mock_fan, mock_duty[2] = {120, 130}, mock_fail, mock_writes;
 static int owned[2], saved[2];
 static int calibration_zero_write;
+/* start_mode: EC mode seen at identity. Default 1 = legacy behaviour (never arm). */
+static int start_mode = 1, armed_manual;
+static int may_arm(void) { return start_mode == 0; }
 static void on_signal(int sig) { (void)sig; interrupted = 1; }
 static double seconds(void) {
     struct timespec ts;
@@ -52,6 +60,7 @@ static int transaction(int command, int direction, int reg, int value, int *repl
                     reg == 0x33 || reg == 0x34 || reg == 0x35)) return -1;
         } else if (direction == 0x82) {
             if (reply || !((reg == 0x32 && value >= 0 && value <= 1) ||
+                           (reg == 0x31 && value >= 0 && value <= 1 && may_arm()) ||
                            (reg == 0x35 && value >= (calibration_zero_write ? 0 : 1) && value <= 255))) return -1;
         } else return -1;
     } else return -1;
@@ -60,6 +69,7 @@ static int transaction(int command, int direction, int reg, int value, int *repl
         if (command == 0xbb) *reply = mock_version;
         else if (direction == 0x82) {
             if (reg == 0x32) mock_fan = value;
+            else if (reg == 0x31) mock_mode = value;
             else { mock_duty[mock_fan] = value; mock_writes++; }
         } else if (reg == 0x30) *reply = mock_count;
         else if (reg == 0x31) *reply = mock_mode;
@@ -92,12 +102,16 @@ static int read_reg(int reg, int *value) { return transaction(0xdd, 0x02, reg, 0
 static int select_fan(int fan) { return transaction(0xdd, 0x82, 0x32, fan, NULL); }
 static int identity(void) {
     int version, count, mode;
-    return transaction(0xbb, 0, 0x50, 0, &version) || read_reg(0x30, &count) ||
-        read_reg(0x31, &mode) || version != 18 || count != 2 || mode != 1 ? -1 : 0;
+    if (transaction(0xbb, 0, 0x50, 0, &version) || read_reg(0x30, &count) ||
+        read_reg(0x31, &mode) || version != 18 || count != 2 || (mode != 0 && mode != 1)) return -1;
+    start_mode = mode;
+    return 0;
 }
+/* Mode is acceptable for telemetry: manual, or automatic in a session allowed to arm. */
+static int mode_ok(int mode) { return mode == 1 || (mode == 0 && may_arm()); }
 static int sample(int fan, int *tach, int *duty) {
     int hi = 0, lo = 0, hi2 = 0, mode;
-    if (read_reg(0x31, &mode) || mode != 1) {
+    if (read_reg(0x31, &mode) || !mode_ok(mode)) {
         fprintf(stderr, "Sample channel %d: mode read/guard failed\n", fan); return -1;
     }
     if (select_fan(fan)) {
@@ -119,9 +133,43 @@ static int sample(int fan, int *tach, int *duty) {
     }
     return 0;
 }
+/* Switch an automatic EC to manual without a speed jump: capture the duty the
+ * EC curve is currently driving, write mode 1, then hold those duties (floor 64,
+ * 230 if unreadable) until the controller sends its own. Verified by readback. */
+static int arm_manual(void) {
+    int keep[2], tach, mode;
+    if (!may_arm()) return -1;
+    for (int fan = 0; fan < 2; fan++) {
+        if (sample(fan, &tach, &keep[fan])) keep[fan] = 230;
+        if (keep[fan] < 64) keep[fan] = 64;
+    }
+    if (transaction(0xdd, 0x82, 0x31, 1, NULL) || read_reg(0x31, &mode) || mode != 1) {
+        fprintf(stderr, "N6506: failed to arm manual mode\n"); return -1;
+    }
+    armed_manual = 1;
+    for (int fan = 0; fan < 2; fan++)
+        if (select_fan(fan) || transaction(0xdd, 0x82, 0x35, keep[fan], NULL)) return -1;
+    fprintf(stderr, "N6506: manual mode armed (held duty %d/%d)\n", keep[0], keep[1]);
+    return 0;
+}
+/* Return an EC that we armed back to its own curve. */
+static int release_auto(void) {
+    int mode;
+    if (!armed_manual) return 0;
+    if (transaction(0xdd, 0x82, 0x31, 0, NULL) || read_reg(0x31, &mode) || mode != 0) {
+        fprintf(stderr, "N6506: failed to release EC to automatic mode\n"); return -1;
+    }
+    armed_manual = 0;
+    fputs("N6506: EC released to automatic fan curve\n", stderr);
+    return 0;
+}
 static int set_duty(int fan, int duty) {
     int mode;
     if (fan < 0 || fan > 1 || duty < (calibration_zero_write ? 0 : 1) || duty > 255) return -1;
+    /* EC may fall back to automatic (resume, EC reset): re-arm if this session may. */
+    if (!read_reg(0x31, &mode) && mode == 0 && may_arm() && arm_manual()) {
+        fprintf(stderr, "Set channel %d: arm failed\n", fan); return -1;
+    }
     if (read_reg(0x31, &mode) || mode != 1 || select_fan(fan)) {
         fprintf(stderr, "Set channel %d: mode/selector transaction failed\n", fan); return -1;
     }
@@ -183,7 +231,22 @@ static int self_test(void) {
     assert(mock_duty[0] == 120 && mock_duty[1] == 130);
     owned[0] = 1; mock_fail = 1; assert(restore());
     assert(read_reg(0x31, &result));
-    puts("PASS: mode writes/zero duty/out-of-range selector rejected; identity, channel isolation, restoration and transport-failure guards. Simulated only.");
+    mock_fail = 0; owned[0] = 0;
+    /* Automatic-at-start session: arm on first control, release on exit. */
+    mock_mode = 0; mock_duty[0] = 40; mock_duty[1] = 150;
+    assert(identity() == 0 && start_mode == 0 && may_arm());
+    assert(transaction(0xdd, 0x82, 0x31, 2, NULL));      /* mode value range */
+    int tach0, duty0; (void)tach0; (void)duty0;
+    assert(sample(0, &tach0, &duty0) == 0);              /* telemetry in auto ok */
+    assert(set_duty(1, 200) == 0);
+    assert(mock_mode == 1 && armed_manual);
+    assert(mock_duty[0] == 64 && mock_duty[1] == 200);   /* held with floor, then set */
+    mock_mode = 0;                                       /* EC fell back (resume) */
+    assert(set_duty(0, 100) == 0 && mock_mode == 1 && mock_duty[0] == 100);
+    assert(release_auto() == 0 && mock_mode == 0 && !armed_manual);
+    start_mode = 1;                                      /* legacy: mode never written */
+    assert(transaction(0xdd, 0x82, 0x31, 0, NULL));
+    puts("PASS: legacy mode-write/zero duty/out-of-range selector rejected; identity, channel isolation, restoration, transport-failure guards; auto-start arm/re-arm/release. Simulated only.");
     return 0;
 }
 
@@ -195,7 +258,7 @@ static int n6506_high(int duty) {
 }
 static int n6506_state(int probe) {
     int rpm[2], duty[2], mode;
-    if (read_reg(0x31, &mode) || mode != 1 ||
+    if (read_reg(0x31, &mode) || !mode_ok(mode) ||
         sample(0, &rpm[0], &duty[0]) || sample(1, &rpm[1], &duty[1])) return -1;
     if (probe) printf("probe 18 2 %d %d %d %d\n", rpm[0], rpm[1], duty[0], duty[1]);
     else printf("state 1 %d %d %d %d\n", rpm[0], rpm[1], duty[0], duty[1]);
@@ -301,11 +364,26 @@ int do_n6506_fanctl(void) {
             if (accepted) { last_command=seconds(); watchdog_high=0; }
         }
     }
-    int rc=n6506_high(230) ? 1 : 0;
+    /* Started in automatic: hand the fans back to the EC curve. Fallback, or
+     * legacy manual-at-start sessions: known high cooling. */
+    int rc;
+    if (may_arm() && !armed_manual) rc = 0;           /* never took control */
+    else if (may_arm() && !release_auto()) rc = 0;
+    else rc = n6506_high(230) ? 1 : 0;
     if (!mock) ioperm(0x25c,2,0);
     if (lock_fd >= 0) close(lock_fd);
     return rc;
 }
 #ifdef N6506_TEST
-int main(int argc, char **argv) { if (argc==2 && !strcmp(argv[1], "--simulate")) { mock=1; return do_n6506_fanctl(); } return self_test(); }
+int main(int argc, char **argv) {
+    if (argc==2 && !strcmp(argv[1], "--simulate")) { mock=1; return do_n6506_fanctl(); }
+    /* EC starts in automatic mode (factory/boot state): exercises arm/release. */
+    if (argc==2 && !strcmp(argv[1], "--simulate-auto")) {
+        mock=1; mock_mode=0;
+        int rc = do_n6506_fanctl();
+        fprintf(stderr, "simulated final mode %d\n", mock_mode);
+        return rc;
+    }
+    return self_test();
+}
 #endif

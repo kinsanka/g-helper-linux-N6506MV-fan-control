@@ -51,3 +51,17 @@ assert request('read') == 'state 1 5600 5600 230 230'
 p.stdin.write('quit\n'); p.stdin.flush(); p.communicate(timeout=5)
 assert p.returncode == 0
 print('PASS: calibration independent point deadline restores cooling despite continued heartbeats')
+
+# EC in automatic mode (0) at start, as on a freshly booted N6506MV.
+# Probe-only sessions must not take control; the first control command arms
+# manual mode holding the EC's current duty; exit releases back to automatic.
+r = subprocess.run([binary, '--simulate-auto'], input='probe\nread\nquit\n', capture_output=True, text=True, check=True)
+assert r.stdout.splitlines()[0] == 'probe 18 2 3400 3600 120 130', r.stdout
+assert 'armed' not in r.stderr and 'simulated final mode 0' in r.stderr, r.stderr
+r = subprocess.run([binary, '--simulate-auto'], input='set 0 200\nread\nquit\n', capture_output=True, text=True, check=True)
+assert 'manual mode armed (held duty 120/130)' in r.stderr, r.stderr
+assert 'state 1 5000 3600 200 130' in r.stdout, r.stdout
+assert 'released to automatic' in r.stderr and 'simulated final mode 0' in r.stderr, r.stderr
+r = subprocess.run([binary, '--simulate'], input='set 0 200\nquit\n', capture_output=True, text=True, check=True)
+assert 'armed' not in r.stderr and 'released' not in r.stderr, r.stderr  # legacy manual-at-start unchanged
+print('PASS: automatic-at-start EC: probe leaves it alone, control arms manual without duty jump, exit releases to automatic')
